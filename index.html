@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ETH-ML — Learning Machine</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/supabase-js/2.39.7/supabase.min.js"></script>
+<style>
+  :root { --bg:#0a0a0a; --panel:#141414; --line:#2a2a2a; --txt:#ddd; --dim:#777; --up:#4ade80; --down:#f87171; --acc:#60a5fa; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:'SF Mono',Consolas,monospace; background:var(--bg); color:var(--txt); min-height:100vh; }
+  .wrap { max-width:1000px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:1.2em; letter-spacing:.05em; } h1 span{color:var(--up)}
+  h2 { font-size:.85em; color:var(--dim); text-transform:uppercase; letter-spacing:.15em; margin:28px 0 10px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
+  .kpi .v { font-size:1.6em; margin-top:4px; } .kpi .l { color:var(--dim); font-size:.75em; text-transform:uppercase; letter-spacing:.1em; }
+  .up{color:var(--up)} .down{color:var(--down)} .dim{color:var(--dim)}
+  table { border-collapse:collapse; width:100%; font-size:.85em; }
+  td,th { border-bottom:1px solid var(--line); padding:7px 10px; text-align:left; }
+  th { color:var(--dim); font-weight:normal; text-transform:uppercase; font-size:.75em; letter-spacing:.1em; }
+  canvas { width:100%; background:#101010; border-radius:6px; }
+  /* auth */
+  #auth { max-width:360px; margin:14vh auto 0; }
+  input { width:100%; background:#0f0f0f; border:1px solid var(--line); border-radius:6px; color:var(--txt); padding:11px 12px; font:inherit; margin-bottom:10px; }
+  button { width:100%; background:var(--up); color:#000; border:0; border-radius:6px; padding:11px; font:inherit; font-weight:bold; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--dim); border:1px solid var(--line); margin-top:8px; }
+  .msg { font-size:.85em; margin-top:10px; min-height:1.2em; } .msg.err{color:var(--down)} .msg.ok{color:var(--up)}
+  #signout { width:auto; float:right; background:transparent; color:var(--dim); border:1px solid var(--line); padding:6px 14px; font-size:.8em; }
+  .foot { color:#555; font-size:.75em; margin-top:32px; line-height:1.5; }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin:0 6px 0 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- LOGIN -->
+  <div id="auth">
+    <h1 style="text-align:center;margin-bottom:24px">ETH-<span>ML</span> · learning machine</h1>
+    <div class="panel">
+      <input id="email" type="email" placeholder="email" autocomplete="username">
+      <input id="pass" type="password" placeholder="password" autocomplete="current-password">
+      <button onclick="signIn()">Sign in</button>
+      <button class="ghost" onclick="signUp()">Create account</button>
+      <div id="authmsg" class="msg"></div>
+    </div>
+    <p class="foot" style="text-align:center">Private research tool. Access by allowlist only.</p>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="dash" style="display:none">
+    <button id="signout" onclick="signOut()">sign out</button>
+    <h1>ETH-<span>ML</span> · learning machine</h1>
+
+    <h2>Tomorrow's call</h2>
+    <div class="grid">
+      <div class="panel kpi"><div class="l">Prediction</div><div class="v" id="k_call">—</div></div>
+      <div class="panel kpi"><div class="l">P(up)</div><div class="v" id="k_p">—</div></div>
+      <div class="panel kpi"><div class="l">Last close</div><div class="v" id="k_close">—</div></div>
+      <div class="panel kpi"><div class="l">Forward accuracy</div><div class="v" id="k_acc">—</div></div>
+      <div class="panel kpi"><div class="l">Scored days</div><div class="v" id="k_days">—</div></div>
+    </div>
+
+    <h2>Walk-forward equity — out-of-sample, after fees <span class="legend"><i style="background:var(--up)"></i>ensemble <i style="background:#666"></i>buy &amp; hold</span></h2>
+    <div class="panel"><canvas id="chart" height="300"></canvas>
+      <p class="dim" style="font-size:.78em;margin-top:8px" id="chartnote"></p></div>
+
+    <h2>Prediction log</h2>
+    <div class="panel" style="padding:0">
+      <table><thead><tr><th>for date</th><th>p(up)</th><th>call</th><th>actual</th><th>result</th><th>move</th></tr></thead>
+      <tbody id="logbody"></tbody></table>
+    </div>
+
+    <h2>Evaluation history</h2>
+    <div class="panel" style="padding:0">
+      <table><thead><tr><th>run</th><th>kind</th><th>verdict / summary</th></tr></thead>
+      <tbody id="evalbody"></tbody></table>
+    </div>
+
+    <p class="foot">Research tool — not financial advice, not signals, no trades are placed.
+    All predictions are logged before outcomes exist. Validation slice locked.
+    Daily retrain at 18:30 CST after the 00:00 UTC candle close.</p>
+  </div>
+</div>
+
+<script>
+const sb = supabase.createClient(
+  "https://ombxobiiwxrqwvsufdzs.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tYnhvYmlpd3hycXd2c3VmZHpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1NTE0MzMsImV4cCI6MjA5OTEyNzQzM30.EqUx2m6GQtHKiXSETyKIGJBEdvixzZGaaEqV5Nma-vQ"
+);
+const $ = id => document.getElementById(id);
+const msg = (t, cls) => { const m = $("authmsg"); m.textContent = t; m.className = "msg " + (cls||""); };
+
+async function signIn() {
+  msg("...");
+  const { error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("pass").value });
+  if (error) return msg(error.message, "err");
+  boot();
+}
+async function signUp() {
+  msg("...");
+  const { error } = await sb.auth.signUp({ email: $("email").value.trim(), password: $("pass").value });
+  if (error) return msg(error.message, "err");
+  msg("Account created — check your email to confirm, then sign in.", "ok");
+}
+async function signOut() { await sb.auth.signOut(); location.reload(); }
+
+async function boot() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return;
+
+  // allowlist check: RLS returns zero rows for non-allowlisted users
+  const { data: probe } = await sb.from("forward_predictions").select("id").limit(1);
+  $("auth").style.display = "none"; $("dash").style.display = "block";
+  if (!probe || probe.length === 0) {
+    const { count } = await sb.from("allowed_emails").select("*", { count: "exact", head: true });
+    if (!count) {
+      $("dash").innerHTML = "<h1>ETH-<span style='color:var(--up)'>ML</span></h1><div class='panel' style='margin-top:20px'>This account (" +
+        session.user.email + ") is not on the allowlist. Ask Mahmoud to add you.</div>";
+      return;
+    }
+  }
+
+  // KPIs
+  const { data: sc } = await sb.from("forward_scorecard").select("*").single();
+  const { data: preds } = await sb.from("forward_predictions")
+    .select("*").order("predict_for_date", { ascending: false }).limit(60);
+  if (preds && preds.length) {
+    const l = preds[0];
+    $("k_call").innerHTML = l.pred_up ? "<span class='up'>UP ▲</span>" : "<span class='down'>DOWN ▼</span>";
+    $("k_p").textContent = Number(l.proba_up).toFixed(3);
+    $("k_close").textContent = "$" + Number(l.last_close).toLocaleString();
+  }
+  $("k_acc").textContent = sc && sc.accuracy_pct != null ? sc.accuracy_pct + "%" : "n/a yet";
+  $("k_days").textContent = sc ? sc.scored_days : "0";
+
+  // log table
+  $("logbody").innerHTML = (preds||[]).map(p => `<tr>
+    <td>${p.predict_for_date}</td><td>${Number(p.proba_up).toFixed(3)}</td>
+    <td class="${p.pred_up?'up':'down'}">${p.pred_up?"UP":"DOWN"}</td>
+    <td>${p.outcome==null?"<span class='dim'>pending</span>":(p.outcome? "up":"down")}</td>
+    <td>${p.correct==null?"—":(p.correct?"<span class='up'>✓</span>":"<span class='down'>✗</span>")}</td>
+    <td>${p.actual_ret_pct==null?"—":(p.actual_ret_pct>0?"+":"")+p.actual_ret_pct+"%"}</td></tr>`).join("");
+
+  // eval history + curve
+  const { data: evals } = await sb.from("eval_runs").select("*").order("run_at", { ascending: false });
+  let curve = null;
+  $("evalbody").innerHTML = (evals||[]).map(e => {
+    if (e.metrics && e.metrics.kind === "curve") { curve = e.metrics.curve; return ""; }
+    const m = e.metrics || {};
+    const s = m.verdict || m.note || JSON.stringify(m).slice(0, 120);
+    return `<tr><td>${new Date(e.run_at).toISOString().slice(0,10)}</td><td>${e.kind}</td><td>${s}</td></tr>`;
+  }).join("");
+  if (curve) drawChart(curve);
+}
+
+function drawChart(c) {
+  const cv = $("chart"), ctx = cv.getContext("2d");
+  const W = cv.width = cv.clientWidth * 2, H = cv.height = 600; // 2x for retina
+  const all = c.ensemble.concat(c.buy_hold);
+  const lo = Math.min(...all), hi = Math.max(...all);
+  const X = i => 40 + i / (c.dates.length - 1) * (W - 60);
+  const Y = v => H - 30 - (Math.log(v) - Math.log(lo)) / (Math.log(hi) - Math.log(lo)) * (H - 60);
+  ctx.font = "20px monospace"; ctx.fillStyle = "#555"; ctx.strokeStyle = "#222";
+  [1,2,5,10].filter(g => g>=lo && g<=hi).forEach(g => {
+    ctx.beginPath(); ctx.moveTo(40, Y(g)); ctx.lineTo(W-20, Y(g)); ctx.stroke();
+    ctx.fillText(g+"x", 4, Y(g)+6);
+  });
+  const line = (arr, col) => { ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.beginPath();
+    arr.forEach((v,i) => i ? ctx.lineTo(X(i),Y(v)) : ctx.moveTo(X(i),Y(v))); ctx.stroke(); };
+  line(c.buy_hold, "#666"); line(c.ensemble, "#4ade80");
+  $("chartnote").textContent = `${c.dates[0]} → ${c.dates[c.dates.length-1]} · log scale · ` +
+    `final: ensemble ${c.ensemble[c.ensemble.length-1].toFixed(1)}x vs buy&hold ${c.buy_hold[c.buy_hold.length-1].toFixed(1)}x — honesty note: the model did NOT beat holding ETH.`;
+}
+
+boot();
+</script>
+</body>
+</html>
